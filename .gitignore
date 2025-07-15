@@ -1,0 +1,20 @@
+# PyInstaller output
+build/
+dist/
+*.zip
+
+# Original versions kept locally only
+_archive/
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.claude/
+desktop.ini
+Thumbs.db
