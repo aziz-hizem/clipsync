@@ -58,8 +58,8 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': 'ClipSync',
         'CFBundleDisplayName': 'ClipSync',
-        'CFBundleVersion': '1.0.0',
-        'CFBundleShortVersionString': '1.0.0',
+        'CFBundleVersion': '1.1.0',
+        'CFBundleShortVersionString': '1.1.0',
         'LSMinimumSystemVersion': '10.14',
         'NSHighResolutionCapable': True,
     },

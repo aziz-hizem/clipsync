@@ -36,19 +36,38 @@ class ClipSyncWorker(QThread):
         self.port = port
         self.running = True
         self.conn = None
+        # Last text known to both computers, shared by the send and receive loops
+        self.last_text: Optional[str] = None
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def recv_exact(conn: socket.socket, length: int) -> Optional[bytes]:
+        """Read exactly `length` bytes, or return None if the connection closes first."""
+        data = b""
+        while len(data) < length:
+            chunk = conn.recv(min(64 * 1024, length - len(data)))
+            if not chunk:
+                return None
+            data += chunk
+        return data
 
     def send_loop(self, conn: socket.socket):
-        last_text: Optional[str] = None
         while self.running:
-            try:
-                current = pyperclip.paste()
-            except Exception:
-                current = ""
-            if current != last_text and current:
+            with self.lock:
+                # Read the clipboard under the lock so a value received meanwhile can't be sent back stale
+                try:
+                    current = pyperclip.paste()
+                except Exception:
+                    current = ""
+                # Text that just arrived from the other computer is not sent back,
+                # otherwise the echo could overwrite a newer copy on that side
+                changed = bool(current) and current != self.last_text
+                if changed:
+                    self.last_text = current
+            if changed:
                 try:
                     data = current.encode("utf-8")
                     conn.sendall(len(data).to_bytes(4, "big") + data)
-                    last_text = current
                 except (BrokenPipeError, OSError):
                     break
             time.sleep(0.25)
@@ -56,19 +75,18 @@ class ClipSyncWorker(QThread):
     def recv_loop(self, conn: socket.socket):
         while self.running:
             try:
-                header = conn.recv(4)
-                if not header:
+                header = self.recv_exact(conn, 4)
+                if header is None:
                     break
-                length = int.from_bytes(header, "big")
-                data = b""
-                while len(data) < length:
-                    chunk = conn.recv(min(64 * 1024, length - len(data)))
-                    if not chunk:
-                        break
-                    data += chunk
+                data = self.recv_exact(conn, int.from_bytes(header, "big"))
+                if data is None:
+                    break
                 text = data.decode("utf-8")
-                if text and pyperclip.paste() != text:
-                    pyperclip.copy(text)
+                if text:
+                    with self.lock:
+                        self.last_text = text
+                        if pyperclip.paste() != text:
+                            pyperclip.copy(text)
             except (BrokenPipeError, OSError):
                 break
 
@@ -110,7 +128,8 @@ class ClipSyncWorker(QThread):
     def run_client(self):
         self.status_update.emit(f"Connecting to {self.host}:{self.port}...")
         try:
-            self.conn = socket.create_connection((self.host, self.port))
+            self.conn = socket.create_connection((self.host, self.port), timeout=5)
+            self.conn.settimeout(None)
             self.status_update.emit("Connected! Clipboard is now shared.")
             with self.conn:
                 threading.Thread(target=self.send_loop, args=(self.conn,), daemon=True).start()
